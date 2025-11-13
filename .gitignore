@@ -1,9 +1,6 @@
 # Ignore Terraform variable files
 *.tfvars
 
-# Ignore .github folder
-.github/
-
 # Ignore Terraform lock file
 .terraform.lock.hcl
 
