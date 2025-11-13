@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Live Poll Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { --fg:#0f172a; --muted:#475569; --bg:#f8fafc; --card:#ffffff; --ring:#e2e8f0; }
+    @media (prefers-color-scheme: dark) {
+      :root { --fg:#e2e8f0; --muted:#94a3b8; --bg:#0b1220; --card:#0f172a; --ring:#1e293b; }
+    }
+    html,body { margin:0; padding:0; background:var(--bg); color:var(--fg); }
+    .wrap { max-width: 520px; margin: 20px auto; padding: 16px; }
+    .card { background:var(--card); border:1px solid var(--ring); border-radius:16px; padding:16px; box-shadow:0 8px 24px rgba(2,8,23,0.06); }
+    h1 { margin: 0 0 4px 0; font-size: 1.25rem; }
+    p { margin: 0.25rem 0 0.75rem 0; color: var(--muted); }
+    #qrcode { display:flex; align-items:center; justify-content:center; margin: 16px auto; padding: 12px; background: var(--bg); border-radius: 12px; border:1px dashed var(--ring); width: 260px; height: 260px; }
+    .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .inputlike { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border:1px solid var(--ring); background:var(--bg); color:var(--fg); border-radius:10px; padding:10px 12px; font-size:.95rem; }
+    .btn { border:1px solid var(--ring); background:var(--card); color:var(--fg); border-radius:10px; padding:10px 14px; font-weight:600; cursor:pointer; }
+    .btn:active { transform: translateY(1px); }
+    .stats { display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin-top: 12px; }
+    .stat { text-align:center; border:1px solid var(--ring); border-radius:12px; padding:12px; }
+    .stat .label { color: var(--muted); font-size:.85rem; }
+    .stat .value { font-size:1.4rem; font-weight:700; margin-top:4px; }
+    .footnote { margin-top: 8px; color: var(--muted); font-size:.85rem; }
+    a.link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Live Poll</h1>
+      <p>{{ question }}</p>
+
+      <div id="qrcode" aria-label="QR code to open the voting page"></div>
+
+      <div class="row" style="margin-top:8px;">
+        <div id="voteUrl" class="inputlike" title="{{ vote_url }}">{{ vote_url }}</div>
+        <button id="copyBtn" class="btn" type="button">Copy</button>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="label">Total</div>
+          <div id="totalCount" class="value">0</div>
+        </div>
+        <div class="stat">
+          <div class="label">Yes</div>
+          <div id="yesCount" class="value">0</div>
+        </div>
+        <div class="stat">
+          <div class="label">No</div>
+          <div id="noCount" class="value">0</div>
+        </div>
+      </div>
+
+      <div class="footnote">
+        QR encodes the URL above. If you set <code>PUBLIC_VOTE_URL</code> (e.g., your Tailscale address), it will be used here.
+      </div>
+    </div>
+  </div>
+
+  <!-- Local QR library (placed at static/qrcode.min.js) -->
+  <script src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
+  <script>
+    // Data from server
+    const voteUrl = "{{ vote_url }}";
+    const statsUrl = "{{ url_for('stats', key=results_key) }}";
+
+    // Render QR
+    new QRCode(document.getElementById("qrcode"), {
+      text: voteUrl,
+      width: 240,
+      height: 240,
+      correctLevel: QRCode.CorrectLevel.M
+    });
+
+    // Copy button
+    document.getElementById("copyBtn").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(voteUrl);
+        const btn = document.getElementById("copyBtn");
+        const old = btn.textContent;
+        btn.textContent = "Copied!";
+        setTimeout(() => (btn.textContent = old), 1000);
+      } catch (e) {
+        // Fallback if clipboard API not allowed
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNode(document.getElementById("voteUrl"));
+        sel.removeAllRanges(); sel.addRange(range);
+        document.execCommand("copy");
+        sel.removeAllRanges();
+      }
+    });
+
+    // Live stats polling
+    async function refreshStats() {
+      try {
+        const res = await fetch(statsUrl, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        document.getElementById("totalCount").textContent = data.total ?? 0;
+        document.getElementById("yesCount").textContent = data.yes ?? 0;
+        document.getElementById("noCount").textContent  = data.no  ?? 0;
+      } catch (e) {
+        // ignore transient errors
+        console.error(e);
+      }
+    }
+    refreshStats();
+    setInterval(refreshStats, 2000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Vote</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 20px auto; text-align: center; padding: 0 12px; }
+    h1 { font-size: 1.4rem; margin-bottom: 1.5rem; }
+    button {
+      padding: 16px 24px;
+      margin: 8px;
+      font-size: 1.2rem;
+      cursor: pointer;
+      border-radius: 8px;
+      border: none;
+      min-width: 120px;
+    }
+    .yes { background: #22c55e; color: white; }
+    .no  { background: #ef4444; color: white; }
+  </style>
+</head>
+<body>
+  <h1>{{ question }}</h1>
+  <form method="post" action="/vote">
+    <button class="yes" type="submit" name="choice" value="yes">Yes</button>
+    <button class="no" type="submit" name="choice" value="no">No</button>
+  </form>
+</body>
+</html>
