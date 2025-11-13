@@ -12,11 +12,11 @@ from flask import (
     jsonify,
 )
 
-DB_PATH = os.environ.get("DB_PATH", "votes.db")
-RESULTS_KEY = os.environ.get("RESULTS_KEY", "changeme")
-QUESTION_TEXT = os.environ.get("QUESTION_TEXT", "Do you support this position?")
-SECRET_SALT = os.environ.get("SECRET_SALT", "super_secret_salt")
-PUBLIC_VOTE_URL = os.environ.get("PUBLIC_VOTE_URL", "").rstrip("/")
+DB_PATH = os.getenv("DB_PATH", "/app/votes.db")
+RESULTS_KEY = os.getenv("RESULTS_KEY", "changeme")
+QUESTION_TEXT = os.getenv("QUESTION_TEXT", "Do you support this position?")
+SECRET_SALT = os.getenv("SECRET_SALT", "super_secret_salt")
+PUBLIC_VOTE_URL = os.getenv("PUBLIC_VOTE_URL", "").rstrip("/")
 
 
 app = Flask(__name__)
@@ -141,6 +141,28 @@ def stats():
     total = yes_count + no_count
     return jsonify({"yes": yes_count, "no": no_count, "total": total})
 
+
+@app.route("/preview", methods=["GET"])
+def preview():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM votes WHERE choice = 'yes'")
+    yes_count = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM votes WHERE choice = 'no'")
+    no_count = cur.fetchone()[0]
+    cur.execute("SELECT choice, created_at FROM votes ORDER BY created_at DESC LIMIT 10")
+    recent_votes = cur.fetchall()
+    conn.close()
+
+    total = yes_count + no_count
+    return render_template(
+        "preview.html",
+        yes=yes_count,
+        no=no_count,
+        total=total,
+        recent_votes=recent_votes,
+        question=QUESTION_TEXT,
+    )
 
 @app.route("/dashboard", methods=["GET"])
 def dashboard():

@@ -1,0 +1,17 @@
+# Ignore Terraform variable files
+*.tfvars
+
+# Ignore .github folder
+.github/
+
+# Ignore Terraform lock file
+.terraform.lock.hcl
+
+# Ignore license files
+LICENSE
+
+# Ignore executable files
+*.exe
+
+# Ignore Terraform folder
+.terraform/
