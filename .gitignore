@@ -12,3 +12,5 @@ LICENSE
 
 # Ignore Terraform folder
 .terraform/
+
+*.db

@@ -47,8 +47,8 @@ resource "aws_ecs_task_definition" "app" {
 
   container_definitions = jsonencode([
     {
-      name      = "survey-poll"
-      image     = "ibooker88/survey-poll:latest"
+      name  = "survey-poll"
+      image = "ibooker88/survey-poll:latest"
       portMappings = [
         {
           containerPort = 8000
@@ -159,8 +159,8 @@ resource "aws_ecs_service" "app" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets         = data.aws_subnets.default.ids
-    security_groups = [aws_security_group.ecs.id]
+    subnets          = data.aws_subnets.default.ids
+    security_groups  = [aws_security_group.ecs.id]
     assign_public_ip = true
   }
 
@@ -170,7 +170,7 @@ resource "aws_ecs_service" "app" {
     container_port   = 8000
   }
 
-  depends_on = [aws_lb_listener.app]
+  depends_on = [aws_lb_listener.https]
 }
 
 resource "aws_iam_role" "ecs_task_execution" {
