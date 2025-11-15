@@ -13,4 +13,7 @@ LICENSE
 # Ignore Terraform folder
 .terraform/
 
+terraform.tfstate
+terraform.tfstate.backup
+
 *.db

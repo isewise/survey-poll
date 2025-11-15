@@ -2,27 +2,74 @@ provider "aws" {
   region = "us-east-1" # Change to your preferred region
 }
 
-data "aws_vpc" "default" {
-  default = true
+# Create a new VPC instead of using the problematic default VPC
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+  
+  tags = {
+    Name = "survey-poll-vpc"
+  }
 }
 
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
+# Create Internet Gateway
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+  
+  tags = {
+    Name = "survey-poll-igw"
   }
+}
+
+# Create Route Table
+resource "aws_route_table" "main" {
+  vpc_id = aws_vpc.main.id
+  
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+  
+  tags = {
+    Name = "survey-poll-rt"
+  }
+}
+
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+# Create subnets in different AZs
+resource "aws_subnet" "main" {
+  count                   = 2
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.${count.index + 1}.0/24"
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  map_public_ip_on_launch = true
+  
+  tags = {
+    Name = "survey-poll-subnet-${count.index + 1}"
+  }
+}
+
+# Associate route table with subnets
+resource "aws_route_table_association" "main" {
+  count          = length(aws_subnet.main)
+  subnet_id      = aws_subnet.main[count.index].id
+  route_table_id = aws_route_table.main.id
 }
 
 resource "aws_security_group" "ecs" {
   name        = "ecs-security-group"
   description = "Allow HTTP and HTTPS traffic"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = aws_vpc.main.id
 
   ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    from_port       = 8000
+    to_port         = 8000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
   }
 
   egress {
@@ -82,12 +129,12 @@ resource "aws_lb" "main" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
-  subnets            = data.aws_subnets.default.ids
+  subnets            = aws_subnet.main[*].id
 }
 
 resource "aws_security_group" "alb" {
   name_prefix = "alb-"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     from_port   = 80
@@ -115,7 +162,7 @@ resource "aws_lb_target_group" "app" {
   name        = "survey-poll-tg"
   port        = 8000
   protocol    = "HTTP"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = aws_vpc.main.id
   target_type = "ip"
 
   health_check {
@@ -159,7 +206,7 @@ resource "aws_ecs_service" "app" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets          = data.aws_subnets.default.ids
+    subnets          = aws_subnet.main[*].id
     security_groups  = [aws_security_group.ecs.id]
     assign_public_ip = true
   }
@@ -188,10 +235,19 @@ resource "aws_iam_role" "ecs_task_execution" {
       }
     ]
   })
+}
 
-  managed_policy_arns = [
-    "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-  ]
+resource "aws_iam_role_policy_attachment" "ecs_task_execution" {
+  role       = aws_iam_role.ecs_task_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+output "available_subnets" {
+  value = aws_subnet.main[*].id
+}
+
+output "subnet_count" {
+  value = length(aws_subnet.main)
 }
 
 output "load_balancer_dns" {
