@@ -84,6 +84,25 @@ resource "aws_ecs_cluster" "main" {
   name = "survey-poll-cluster"
 }
 
+# Fargate capacity providers for cost optimization
+resource "aws_ecs_cluster_capacity_providers" "main" {
+  cluster_name = aws_ecs_cluster.main.name
+
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
+
+  default_capacity_provider_strategy {
+    capacity_provider = "FARGATE_SPOT"
+    weight           = 70
+    base             = 0
+  }
+
+  default_capacity_provider_strategy {
+    capacity_provider = "FARGATE"
+    weight           = 30
+    base             = 1
+  }
+}
+
 # S3 bucket for database backups
 resource "aws_s3_bucket" "backups" {
   bucket = "survey-poll-db-backups-${random_string.bucket_suffix.result}"
@@ -243,7 +262,20 @@ resource "aws_ecs_service" "app" {
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.app.arn
   desired_count   = 1
-  launch_type     = "FARGATE"
+  force_new_deployment = true
+
+  # Use capacity provider strategy for Fargate Spot
+  capacity_provider_strategy {
+    capacity_provider = "FARGATE_SPOT"
+    weight           = 70
+    base             = 0
+  }
+
+  capacity_provider_strategy {
+    capacity_provider = "FARGATE"
+    weight           = 30
+    base             = 1
+  }
 
   network_configuration {
     subnets          = aws_subnet.main[*].id
