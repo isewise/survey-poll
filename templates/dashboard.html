@@ -77,9 +77,8 @@
       <!-- Navigation Links -->
       <div class="nav-links">
         <a href="{{ vote_url }}" target="_blank">🗳️ Vote Page</a>
-        <a href="{{ url_for('results') }}">📊 Full Results</a>
-        <a href="{{ url_for('stats') }}">📈 JSON Stats</a>
-        <a href="{{ url_for('logout') }}" onclick="return confirm('Are you sure you want to logout?')">🚪 Logout</a>
+        <a href="{{ url_for('results', key=results_key) }}">📊 Full Results</a>
+        <a href="{{ url_for('stats', key=results_key) }}">📈 JSON Stats</a>
         <a href="https://www.isaacebooker.com" target="_blank">🌐 My Website</a>
       </div>
 
@@ -110,10 +109,11 @@
       </div>
 
       <div class="admin-actions">
-        <a href="{{ url_for('export_data') }}" class="btn" style="text-decoration: none;">
+        <a href="{{ url_for('export_data', key=results_key) }}" class="btn" style="text-decoration: none;">
           📊 Export Data (CSV)
         </a>
         <form method="POST" action="{{ url_for('manual_backup') }}" style="flex: 1; min-width: 140px;">
+          <input type="hidden" name="key" value="{{ results_key }}">
           <button type="submit" class="btn" style="width: 100%;">
             💾 Backup to S3
           </button>
@@ -132,6 +132,7 @@
       <p>This will permanently delete ALL votes. This action cannot be undone!</p>
       <p>To confirm, type <strong>DELETE_ALL_VOTES</strong> below:</p>
       <form method="POST" action="{{ url_for('reset_database') }}">
+        <input type="hidden" name="key" value="{{ results_key }}">
         <input type="text" name="confirm" placeholder="Type: DELETE_ALL_VOTES" autocomplete="off">
         <div class="modal-buttons">
           <button type="button" onclick="hideResetModal()" class="btn">Cancel</button>
@@ -146,7 +147,7 @@
   <script>
     // Data from server
     const voteUrl = "{{ vote_url }}";
-    const statsUrl = "{{ url_for('stats') }}";
+    const statsUrl = "{{ url_for('stats', key=results_key) }}";
 
     // Render QR
     new QRCode(document.getElementById("qrcode"), {
