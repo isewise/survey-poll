@@ -27,8 +27,8 @@ PUBLIC_VOTE_URL = os.getenv("PUBLIC_VOTE_URL", "").rstrip("/")
 
 # Security Configuration
 ADMIN_SESSION_TIMEOUT = int(os.getenv("ADMIN_SESSION_TIMEOUT", "3600"))  # 1 hour
-MAX_LOGIN_ATTEMPTS = int(os.getenv("MAX_LOGIN_ATTEMPTS", "5"))
-RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "900"))  # 15 minutes
+MAX_LOGIN_ATTEMPTS = int(os.getenv("MAX_LOGIN_ATTEMPTS", "10"))  # Increased from 5 to 10
+RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "600"))  # 10 minutes instead of 15
 
 # Rate limiting storage
 failed_attempts = defaultdict(list)
@@ -71,7 +71,7 @@ def check_rate_limit(ip):
     
     # Check if too many attempts
     if len(failed_attempts[ip]) >= MAX_LOGIN_ATTEMPTS:
-        blocked_ips[ip] = current_time + RATE_LIMIT_WINDOW  # Block for 15 minutes
+        blocked_ips[ip] = current_time + RATE_LIMIT_WINDOW  # Block for 10 minutes
         return False
     
     return True
@@ -103,27 +103,28 @@ def require_admin_auth():
     """Decorator-like function to check admin authentication"""
     ip = get_client_ip()
     
-    # Check rate limiting first
-    if not check_rate_limit(ip):
-        abort(429, "Too many failed attempts. Try again later.")
-    
-    # Check session authentication
+    # Check session authentication first (no rate limiting for valid sessions)
     if is_admin_authenticated():
         return True
     
-    # Check if key is provided in request
+    # Only apply rate limiting when user is trying to authenticate
     key = request.args.get("key", "") or request.form.get("key", "")
-    if key == RESULTS_KEY:
-        # Valid key - create session
-        session['admin_authenticated'] = True
-        session['admin_login_time'] = time.time()
-        session.permanent = True
-        return True
-    elif key:  # Wrong key provided
-        record_failed_attempt(ip)
-        abort(403, "Invalid authentication key")
+    if key:  # User provided a key, check rate limiting
+        if not check_rate_limit(ip):
+            abort(429, "Too many failed attempts. Try again later.")
+        
+        if key == RESULTS_KEY:
+            # Valid key - create session
+            session['admin_authenticated'] = True
+            session['admin_login_time'] = time.time()
+            session.permanent = True
+            return True
+        else:
+            # Invalid key - record failed attempt
+            record_failed_attempt(ip)
+            abort(403, "Access denied")
     
-    # No authentication
+    # No authentication provided
     abort(403, "Authentication required")
 
 
@@ -397,6 +398,16 @@ def logout():
     session.clear()
     return redirect(url_for("index"))
 
+
+@app.route("/clear_blocks", methods=["GET"])
+def clear_blocks():
+    """Clear rate limiting blocks (for debugging)"""
+    key = request.args.get('key')
+    if key == RESULTS_KEY:
+        failed_attempts.clear()
+        blocked_ips.clear()
+        return {"message": "Rate limiting blocks cleared", "status": "success"}
+    return {"message": "Access denied", "status": "error"}, 403
 
 
 if __name__ == "__main__":
