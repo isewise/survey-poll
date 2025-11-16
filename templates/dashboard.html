@@ -77,8 +77,8 @@
       <!-- Navigation Links -->
       <div class="nav-links">
         <a href="{{ vote_url }}" target="_blank">🗳️ Vote Page</a>
-        <a href="{{ url_for('results', key=results_key) }}">📊 Full Results</a>
-        <a href="{{ url_for('stats', key=results_key) }}">📈 JSON Stats</a>
+        <a href="{{ url_for('results') }}?key={{ results_key | urlencode }}">📊 Full Results</a>
+        <a href="{{ url_for('stats') }}?key={{ results_key | urlencode }}">📈 JSON Stats</a>
         <a href="https://www.isaacebooker.com" target="_blank">🌐 My Website</a>
       </div>
 
@@ -109,7 +109,7 @@
       </div>
 
       <div class="admin-actions">
-        <a href="{{ url_for('export_data', key=results_key) }}" class="btn" style="text-decoration: none;">
+        <a href="{{ url_for('export_data') }}?key={{ results_key | urlencode }}" class="btn" style="text-decoration: none;">
           📊 Export Data (CSV)
         </a>
         <form method="POST" action="{{ url_for('manual_backup') }}" style="flex: 1; min-width: 140px;">
@@ -147,7 +147,7 @@
   <script>
     // Data from server
     const voteUrl = "{{ vote_url }}";
-    const statsUrl = "{{ url_for('stats', key=results_key) }}";
+    const statsUrl = "{{ url_for('stats') }}?key={{ results_key | urlencode }}";
 
     // Render QR
     new QRCode(document.getElementById("qrcode"), {

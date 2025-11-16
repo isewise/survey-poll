@@ -165,6 +165,21 @@ def thanks():
     return render_template("thanks.html")
 
 
+@app.route("/debug", methods=["GET"])
+def debug():
+    """Debug route to check key authentication"""
+    provided_key = request.args.get("key", "")
+    expected_key = RESULTS_KEY
+    
+    return jsonify({
+        "provided_key": provided_key,
+        "expected_key": expected_key,
+        "keys_match": provided_key == expected_key,
+        "provided_key_length": len(provided_key),
+        "expected_key_length": len(expected_key)
+    })
+
+
 @app.route("/results", methods=["GET"])
 def results():
     key = request.args.get("key", "")
