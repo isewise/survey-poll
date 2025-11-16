@@ -84,6 +84,33 @@ resource "aws_ecs_cluster" "main" {
   name = "survey-poll-cluster"
 }
 
+# S3 bucket for database backups
+resource "aws_s3_bucket" "backups" {
+  bucket = "survey-poll-db-backups-${random_string.bucket_suffix.result}"
+}
+
+resource "aws_s3_bucket_versioning" "backups" {
+  bucket = aws_s3_bucket.backups.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "backups" {
+  bucket = aws_s3_bucket.backups.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "random_string" "bucket_suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
 resource "aws_ecs_task_definition" "app" {
   family                   = "survey-poll-task"
   network_mode             = "awsvpc"
@@ -91,6 +118,7 @@ resource "aws_ecs_task_definition" "app" {
   cpu                      = "256"
   memory                   = "512"
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+  task_role_arn           = aws_iam_role.ecs_task.arn
 
   container_definitions = jsonencode([
     {
@@ -118,6 +146,18 @@ resource "aws_ecs_task_definition" "app" {
         {
           name  = "SECRET_SALT"
           value = var.secret_salt
+        },
+        {
+          name  = "S3_BUCKET"
+          value = aws_s3_bucket.backups.id
+        },
+        {
+          name  = "S3_KEY"
+          value = "survey-poll/votes.db"
+        },
+        {
+          name  = "AWS_REGION"
+          value = "us-east-1"
         }
       ]
     }
@@ -240,6 +280,56 @@ resource "aws_iam_role" "ecs_task_execution" {
 resource "aws_iam_role_policy_attachment" "ecs_task_execution" {
   role       = aws_iam_role.ecs_task_execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+# ECS Task Role (for application to access AWS services)
+resource "aws_iam_role" "ecs_task" {
+  name = "ecsTaskRole"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# S3 access policy for backups
+resource "aws_iam_role_policy" "ecs_task_s3" {
+  name = "ecsTaskS3Policy"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+        Resource = "${aws_s3_bucket.backups.arn}/*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket"
+        ]
+        Resource = aws_s3_bucket.backups.arn
+      }
+    ]
+  })
+}
+
+output "s3_bucket_name" {
+  value = aws_s3_bucket.backups.id
 }
 
 output "available_subnets" {

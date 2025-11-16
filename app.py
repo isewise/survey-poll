@@ -1,6 +1,9 @@
 import os
 import sqlite3
 import hashlib
+import csv
+import io
+import boto3
 from datetime import datetime
 from flask import (
     Flask,
@@ -10,6 +13,7 @@ from flask import (
     url_for,
     abort,
     jsonify,
+    make_response,
 )
 
 DB_PATH = os.getenv("DB_PATH", "/app/votes.db")
@@ -18,8 +22,65 @@ QUESTION_TEXT = os.getenv("QUESTION_TEXT", "Do you support this position?")
 SECRET_SALT = os.getenv("SECRET_SALT", "super_secret_salt")
 PUBLIC_VOTE_URL = os.getenv("PUBLIC_VOTE_URL", "").rstrip("/")
 
+# S3 Configuration
+S3_BUCKET = os.getenv("S3_BUCKET", "")
+S3_KEY = os.getenv("S3_KEY", "survey-poll/votes.db")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+
+# Initialize S3 client if bucket is configured
+s3_client = None
+if S3_BUCKET:
+    try:
+        s3_client = boto3.client('s3', region_name=AWS_REGION)
+    except Exception as e:
+        print(f"Warning: Could not initialize S3 client: {e}")
+
 
 app = Flask(__name__)
+
+
+def backup_db_to_s3():
+    """Backup database to S3"""
+    if not s3_client or not S3_BUCKET:
+        print("S3 not configured, skipping backup")
+        return False
+    
+    try:
+        if os.path.exists(DB_PATH):
+            s3_client.upload_file(DB_PATH, S3_BUCKET, S3_KEY)
+            print(f"Database backed up to s3://{S3_BUCKET}/{S3_KEY}")
+            return True
+        else:
+            print("No database file to backup")
+            return False
+    except Exception as e:
+        print(f"Failed to backup database to S3: {e}")
+        return False
+
+
+def restore_db_from_s3():
+    """Restore database from S3 if it exists"""
+    if not s3_client or not S3_BUCKET:
+        print("S3 not configured, skipping restore")
+        return False
+    
+    try:
+        # Check if backup exists
+        s3_client.head_object(Bucket=S3_BUCKET, Key=S3_KEY)
+        
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        
+        # Download the backup
+        s3_client.download_file(S3_BUCKET, S3_KEY, DB_PATH)
+        print(f"Database restored from s3://{S3_BUCKET}/{S3_KEY}")
+        return True
+    except s3_client.exceptions.NoSuchKey:
+        print("No backup found in S3, will create new database")
+        return False
+    except Exception as e:
+        print(f"Failed to restore database from S3: {e}")
+        return False
 
 
 def get_db():
@@ -29,6 +90,9 @@ def get_db():
 
 
 def init_db():
+    # Try to restore from S3 first
+    restore_db_from_s3()
+    
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
@@ -89,6 +153,10 @@ def vote():
     )
     conn.commit()
     conn.close()
+    
+    # Backup to S3 after new vote
+    backup_db_to_s3()
+    
     return redirect(url_for("thanks"))
 
 
@@ -179,6 +247,73 @@ def dashboard():
         vote_url=vote_url,
         results_key=RESULTS_KEY,
     )
+
+
+@app.route("/export", methods=["GET"])
+def export_data():
+    key = request.args.get("key", "")
+    if key != RESULTS_KEY:
+        abort(403)
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, choice, ip, user_agent, created_at FROM votes ORDER BY created_at DESC")
+    rows = cur.fetchall()
+    conn.close()
+
+    # Create CSV output
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Write header
+    writer.writerow(["ID", "Choice", "IP Address", "User Agent", "Created At"])
+    
+    # Write data
+    for row in rows:
+        writer.writerow([row[0], row[1], row[2], row[3], row[4]])
+    
+    # Create response
+    response = make_response(output.getvalue())
+    response.headers["Content-Type"] = "text/csv"
+    response.headers["Content-Disposition"] = f"attachment; filename=poll_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    return response
+
+
+@app.route("/reset", methods=["POST"])
+def reset_database():
+    key = request.form.get("key", "")
+    confirm = request.form.get("confirm", "")
+    
+    if key != RESULTS_KEY:
+        abort(403)
+    
+    if confirm != "DELETE_ALL_VOTES":
+        return redirect(url_for("dashboard", key=RESULTS_KEY, error="confirmation_failed"))
+    
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM votes")
+    deleted_count = cur.rowcount
+    conn.commit()
+    conn.close()
+    
+    # Backup to S3 after reset (empty database)
+    backup_db_to_s3()
+    
+    return redirect(url_for("dashboard", key=RESULTS_KEY, reset="success", deleted=deleted_count))
+
+
+@app.route("/backup", methods=["POST"])
+def manual_backup():
+    key = request.form.get("key", "")
+    if key != RESULTS_KEY:
+        abort(403)
+    
+    if backup_db_to_s3():
+        return redirect(url_for("dashboard", key=RESULTS_KEY, backup="success"))
+    else:
+        return redirect(url_for("dashboard", key=RESULTS_KEY, backup="failed"))
 
 
 

@@ -25,11 +25,49 @@
     .stat .value { font-size:1.4rem; font-weight:700; margin-top:4px; }
     .footnote { margin-top: 8px; color: var(--muted); font-size:.85rem; }
     a.link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--muted); }
+    .btn-danger { background: #dc2626; color: white; border-color: #dc2626; }
+    .btn-danger:hover { background: #b91c1c; border-color: #b91c1c; }
+    .admin-actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 16px; }
+    .admin-actions a, .admin-actions button { flex: 1; min-width: 140px; text-align: center; }
+    #resetModal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 100; }
+    #resetModal .modal-content { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--card); border-radius: 16px; padding: 24px; max-width: 400px; width: 90%; border: 1px solid var(--ring); }
+    #resetModal h3 { margin: 0 0 16px 0; color: #dc2626; }
+    #resetModal input { width: 100%; padding: 10px; border: 1px solid var(--ring); border-radius: 8px; margin: 8px 0; background: var(--bg); color: var(--fg); }
+    #resetModal .modal-buttons { display: flex; gap: 8px; margin-top: 16px; }
+    #resetModal .modal-buttons button { flex: 1; }
+    .alert { padding: 12px; border-radius: 8px; margin-bottom: 16px; }
+    .alert-success { background: #dcfce7; border: 1px solid #86efac; color: #166534; }
+    .alert-error { background: #fef2f2; border: 1px solid #fca5a5; color: #dc2626; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
+      <!-- Status Messages -->
+      {% if request.args.get('reset') == 'success' %}
+        <div class="alert alert-success">
+          ✅ Database reset successfully! {{ request.args.get('deleted', '0') }} votes deleted.
+        </div>
+      {% endif %}
+      
+      {% if request.args.get('error') == 'confirmation_failed' %}
+        <div class="alert alert-error">
+          ❌ Reset failed: Confirmation text was incorrect.
+        </div>
+      {% endif %}
+
+      {% if request.args.get('backup') == 'success' %}
+        <div class="alert alert-success">
+          ✅ Database backed up to S3 successfully!
+        </div>
+      {% endif %}
+      
+      {% if request.args.get('backup') == 'failed' %}
+        <div class="alert alert-error">
+          ❌ Backup failed: Check S3 configuration.
+        </div>
+      {% endif %}
+
       <h1>Live Poll</h1>
       <p>{{ question }}</p>
 
@@ -58,6 +96,38 @@
       <div class="footnote">
         QR encodes the URL above. If you set <code>PUBLIC_VOTE_URL</code> (e.g., your Tailscale address), it will be used here.
       </div>
+
+      <div class="admin-actions">
+        <a href="{{ url_for('export_data', key=results_key) }}" class="btn" style="text-decoration: none;">
+          📊 Export Data (CSV)
+        </a>
+        <form method="POST" action="{{ url_for('manual_backup') }}" style="flex: 1; min-width: 140px;">
+          <input type="hidden" name="key" value="{{ results_key }}">
+          <button type="submit" class="btn" style="width: 100%;">
+            💾 Backup to S3
+          </button>
+        </form>
+        <button onclick="showResetModal()" class="btn btn-danger" type="button">
+          🗑️ Reset Database
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reset Confirmation Modal -->
+  <div id="resetModal">
+    <div class="modal-content">
+      <h3>⚠️ Reset Database</h3>
+      <p>This will permanently delete ALL votes. This action cannot be undone!</p>
+      <p>To confirm, type <strong>DELETE_ALL_VOTES</strong> below:</p>
+      <form method="POST" action="{{ url_for('reset_database') }}">
+        <input type="hidden" name="key" value="{{ results_key }}">
+        <input type="text" name="confirm" placeholder="Type: DELETE_ALL_VOTES" autocomplete="off">
+        <div class="modal-buttons">
+          <button type="button" onclick="hideResetModal()" class="btn">Cancel</button>
+          <button type="submit" class="btn btn-danger">Delete All Votes</button>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -111,6 +181,31 @@
     }
     refreshStats();
     setInterval(refreshStats, 2000);
+
+    // Reset modal functions
+    function showResetModal() {
+      document.getElementById('resetModal').style.display = 'block';
+    }
+
+    function hideResetModal() {
+      document.getElementById('resetModal').style.display = 'none';
+      // Clear the confirmation input
+      document.querySelector('#resetModal input[name="confirm"]').value = '';
+    }
+
+    // Close modal when clicking outside
+    document.getElementById('resetModal').addEventListener('click', (e) => {
+      if (e.target.id === 'resetModal') {
+        hideResetModal();
+      }
+    });
+
+    // Close modal with Escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        hideResetModal();
+      }
+    });
   </script>
 </body>
 </html>
