@@ -125,9 +125,9 @@ A simple, secure web-based polling application built with Flask and designed for
 | `/dashboard?key=<password>` | GET | Admin dashboard with QR code |
 
 **Current Access URLs:**
-- Public: `https://poll.isaacebooker.com/`
+- Public vote: `https://poll.isaacebooker.com/`
 - Preview: `https://poll.isaacebooker.com/preview`
-- Admin: `https://poll.isaacebooker.com/dashboard?key=easybtc`
+- Admin: `https://poll.isaacebooker.com/dashboard?key=<password>`
 
 ## Security Features
 
