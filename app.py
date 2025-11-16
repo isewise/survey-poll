@@ -4,7 +4,9 @@ import hashlib
 import csv
 import io
 import boto3
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
+from collections import defaultdict
 from flask import (
     Flask,
     request,
@@ -14,6 +16,7 @@ from flask import (
     abort,
     jsonify,
     make_response,
+    session,
 )
 
 DB_PATH = os.getenv("DB_PATH", "/app/votes.db")
@@ -21,6 +24,15 @@ RESULTS_KEY = os.getenv("RESULTS_KEY", "changeme")
 QUESTION_TEXT = os.getenv("QUESTION_TEXT", "Do you support this position?")
 SECRET_SALT = os.getenv("SECRET_SALT", "super_secret_salt")
 PUBLIC_VOTE_URL = os.getenv("PUBLIC_VOTE_URL", "").rstrip("/")
+
+# Security Configuration
+ADMIN_SESSION_TIMEOUT = int(os.getenv("ADMIN_SESSION_TIMEOUT", "3600"))  # 1 hour
+MAX_LOGIN_ATTEMPTS = int(os.getenv("MAX_LOGIN_ATTEMPTS", "5"))
+RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "900"))  # 15 minutes
+
+# Rate limiting storage
+failed_attempts = defaultdict(list)
+blocked_ips = {}
 
 # S3 Configuration
 S3_BUCKET = os.getenv("S3_BUCKET", "")
@@ -37,6 +49,82 @@ if S3_BUCKET:
 
 
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", SECRET_SALT)  # Use for sessions
+
+
+def check_rate_limit(ip):
+    """Check if IP is rate limited"""
+    current_time = time.time()
+    
+    # Check if IP is currently blocked
+    if ip in blocked_ips:
+        if current_time < blocked_ips[ip]:
+            return False  # Still blocked
+        else:
+            del blocked_ips[ip]  # Unblock expired block
+    
+    # Clean old failed attempts
+    failed_attempts[ip] = [
+        attempt_time for attempt_time in failed_attempts[ip]
+        if current_time - attempt_time < RATE_LIMIT_WINDOW
+    ]
+    
+    # Check if too many attempts
+    if len(failed_attempts[ip]) >= MAX_LOGIN_ATTEMPTS:
+        blocked_ips[ip] = current_time + RATE_LIMIT_WINDOW  # Block for 15 minutes
+        return False
+    
+    return True
+
+
+def record_failed_attempt(ip):
+    """Record a failed login attempt"""
+    failed_attempts[ip].append(time.time())
+
+
+def is_admin_authenticated():
+    """Check if current session is authenticated as admin"""
+    if 'admin_authenticated' not in session:
+        return False
+    
+    if 'admin_login_time' not in session:
+        return False
+    
+    # Check session timeout
+    login_time = session['admin_login_time']
+    if time.time() - login_time > ADMIN_SESSION_TIMEOUT:
+        session.clear()
+        return False
+    
+    return session['admin_authenticated']
+
+
+def require_admin_auth():
+    """Decorator-like function to check admin authentication"""
+    ip = get_client_ip()
+    
+    # Check rate limiting first
+    if not check_rate_limit(ip):
+        abort(429, "Too many failed attempts. Try again later.")
+    
+    # Check session authentication
+    if is_admin_authenticated():
+        return True
+    
+    # Check if key is provided in request
+    key = request.args.get("key", "") or request.form.get("key", "")
+    if key == RESULTS_KEY:
+        # Valid key - create session
+        session['admin_authenticated'] = True
+        session['admin_login_time'] = time.time()
+        session.permanent = True
+        return True
+    elif key:  # Wrong key provided
+        record_failed_attempt(ip)
+        abort(403, "Invalid authentication key")
+    
+    # No authentication
+    abort(403, "Authentication required")
 
 
 def backup_db_to_s3():
@@ -167,9 +255,7 @@ def thanks():
 
 @app.route("/results", methods=["GET"])
 def results():
-    key = request.args.get("key", "")
-    if key != RESULTS_KEY:
-        abort(403)
+    require_admin_auth()
 
     conn = get_db()
     cur = conn.cursor()
@@ -194,9 +280,7 @@ def results():
 
 @app.route("/stats", methods=["GET"])
 def stats():
-    key = request.args.get("key", "")
-    if key != RESULTS_KEY:
-        abort(403)
+    require_admin_auth()
 
     conn = get_db()
     cur = conn.cursor()
@@ -234,9 +318,7 @@ def preview():
 
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
-    key = request.args.get("key", "")
-    if key != RESULTS_KEY:
-        abort(403)
+    require_admin_auth()
 
     # Prefer the externally reachable URL if provided
     vote_url = (PUBLIC_VOTE_URL + "/") if PUBLIC_VOTE_URL else (request.url_root.rstrip("/") + "/")
@@ -245,15 +327,12 @@ def dashboard():
         "dashboard.html",
         question=QUESTION_TEXT,
         vote_url=vote_url,
-        results_key=RESULTS_KEY,
     )
 
 
 @app.route("/export", methods=["GET"])
 def export_data():
-    key = request.args.get("key", "")
-    if key != RESULTS_KEY:
-        abort(403)
+    require_admin_auth()
 
     conn = get_db()
     cur = conn.cursor()
@@ -282,14 +361,12 @@ def export_data():
 
 @app.route("/reset", methods=["POST"])
 def reset_database():
-    key = request.form.get("key", "")
+    require_admin_auth()
+    
     confirm = request.form.get("confirm", "")
     
-    if key != RESULTS_KEY:
-        abort(403)
-    
     if confirm != "DELETE_ALL_VOTES":
-        return redirect(url_for("dashboard", key=RESULTS_KEY, error="confirmation_failed"))
+        return redirect(url_for("dashboard", error="confirmation_failed"))
     
     conn = get_db()
     cur = conn.cursor()
@@ -301,19 +378,24 @@ def reset_database():
     # Backup to S3 after reset (empty database)
     backup_db_to_s3()
     
-    return redirect(url_for("dashboard", key=RESULTS_KEY, reset="success", deleted=deleted_count))
+    return redirect(url_for("dashboard", reset="success", deleted=deleted_count))
 
 
 @app.route("/backup", methods=["POST"])
 def manual_backup():
-    key = request.form.get("key", "")
-    if key != RESULTS_KEY:
-        abort(403)
+    require_admin_auth()
     
     if backup_db_to_s3():
-        return redirect(url_for("dashboard", key=RESULTS_KEY, backup="success"))
+        return redirect(url_for("dashboard", backup="success"))
     else:
-        return redirect(url_for("dashboard", key=RESULTS_KEY, backup="failed"))
+        return redirect(url_for("dashboard", backup="failed"))
+
+
+@app.route("/logout", methods=["POST", "GET"])
+def logout():
+    """Logout admin user"""
+    session.clear()
+    return redirect(url_for("index"))
 
 
 

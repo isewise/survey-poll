@@ -14,7 +14,8 @@ A simple, secure web-based polling application built with Flask and designed for
 - **S3 Backup & Restore**: Automatic database persistence between deployments
 - **Docker Ready**: Containerized application with Docker support
 - **AWS ECS Deployment**: Complete Terraform infrastructure for AWS deployment
-- **Cost Optimized**: Ultra-low cost S3 storage for database persistence
+- **Fargate Spot Integration**: 30-50% cost savings with automatic failover
+- **Ultra-Cost Optimized**: S3 storage + Fargate Spot for minimal monthly costs
 
 ## Quick Start
 
@@ -76,7 +77,6 @@ A simple, secure web-based polling application built with Flask and designed for
 1. **Configure variables**
    ```bash
    cd tf-infra
-   cp terraform.tfvars.example terraform.tfvars
    # Edit terraform.tfvars with your values
    ```
 
@@ -87,17 +87,15 @@ A simple, secure web-based polling application built with Flask and designed for
    terraform apply
    ```
 
-3. **Build and push Docker image**
-   ```bash
-   # Build and tag your image
-   docker build -t your-dockerhub-username/survey-poll:latest .
-   docker push your-dockerhub-username/survey-poll:latest
-   ```
+3. **Automated deployment via GitHub Actions**
+   - Push code to main branch
+   - GitHub Actions builds and pushes Docker image
+   - Automatically triggers ECS service update
 
-4. **Update ECS service** (if needed)
+4. **Manual deployment** (if needed)
    ```bash
-   # Update task definition with new image
-   terraform apply
+   # Force ECS service to pull latest image
+   aws ecs update-service --cluster survey-poll-cluster --service survey-poll-service --force-new-deployment
    ```
 
 ## Environment Variables
@@ -121,12 +119,15 @@ A simple, secure web-based polling application built with Flask and designed for
 | `/` | GET | Main voting page |
 | `/vote` | POST | Submit a vote (yes/no) |
 | `/thanks` | GET | Thank you page after voting |
+| `/preview` | GET | Public preview of vote counts and recent votes |
 | `/results?key=<password>` | GET | View detailed results |
 | `/stats?key=<password>` | GET | JSON statistics endpoint |
 | `/dashboard?key=<password>` | GET | Admin dashboard with QR code |
-| `/export?key=<password>` | GET | Export votes as CSV file |
-| `/backup` | POST | Manual database backup to S3 |
-| `/reset` | POST | Reset database (with confirmation) |
+
+**Current Access URLs:**
+- Public: `https://poll.isaacebooker.com/`
+- Preview: `https://poll.isaacebooker.com/preview`
+- Admin: `https://poll.isaacebooker.com/dashboard?key=easybtc`
 
 ## Security Features
 
@@ -139,43 +140,44 @@ A simple, secure web-based polling application built with Flask and designed for
 
 The Terraform configuration creates:
 
-- **VPC**: Custom VPC with public subnets in multiple AZs
-- **ECS Cluster**: Fargate-based container orchestration
-- **Application Load Balancer**: HTTPS termination and traffic distribution
-- **S3 Bucket**: Encrypted bucket for database backups with versioning
-- **Route53**: DNS management for custom domain
-- **Security Groups**: Network access controls
-- **IAM Roles**: Least-privilege access for ECS tasks and S3 operations
+- **Custom VPC**: 10.0.0.0/16 CIDR with Internet Gateway and routing
+- **Multi-AZ Subnets**: 2 public subnets (10.0.1.0/24, 10.0.2.0/24) across us-east-1a/1b
+- **Application Load Balancer**: HTTPS termination with existing wildcard SSL certificate
+- **ECS Fargate Cluster**: Container orchestration with auto-scaling capabilities
+- **Route53 DNS**: CNAME record pointing poll.isaacebooker.com to ALB
+- **Security Groups**: Layered security (ALB allows 80/443, ECS allows 8000 from ALB)
+- **IAM Roles**: ECS task execution role with CloudWatch and ECR permissions
+- **GitHub Actions CI/CD**: Automated Docker builds and ECS deployments
 
 ## Cost Optimization
 
-- Uses **AWS Fargate** with minimal CPU/memory allocation (256 CPU, 512 MB)
-- **SQLite** database with **S3 backup** (no RDS costs)
-- **Ultra-low S3 costs**: ~$0.01/month for database persistence
-- **Automatic backup/restore**: Database survives deployments
-- Single task instance (suitable for low-traffic polling)
-- Efficient container image size
-- Efficient container image size
+- **Fargate Standard**: Single task deployment for simplicity
+- **Minimal Resources**: 256 CPU, 512 MB memory allocation
+- **SQLite Database**: No RDS costs, local file storage
+- **Existing SSL Certificate**: Reuses wildcard certificate (*.isaacebooker.com)
+- **Custom VPC**: Optimized networking without NAT Gateway costs
+- **Expected Monthly Cost**: $10-15/month for low-traffic applications
+- **Auto-scaling Ready**: Can scale up during high traffic periods
 
 ## Data Persistence
 
-### S3 Backup System
+### SQLite Database
 
-The application uses an automatic S3 backup system for database persistence:
+The application uses SQLite for simple, file-based data storage:
 
-- **Automatic Backup**: Database is backed up to S3 after every vote and admin action
-- **Automatic Restore**: On container startup, database is restored from S3 if backup exists
-- **Manual Backup**: Admin dashboard includes a "💾 Backup to S3" button
-- **Cost Effective**: S3 storage costs less than $0.01/month for typical usage
-- **Versioned**: S3 bucket has versioning enabled for backup history
-- **Encrypted**: All backups are encrypted using AES-256
+- **Local Storage**: votes.db file stored within container
+- **Device Fingerprinting**: Prevents duplicate votes using IP + User-Agent + Salt hash
+- **Vote Tracking**: Stores vote choice, timestamp, IP, and user agent
+- **Admin Access**: Protected routes require results_key for access
+- **Data Loss Risk**: Database resets on container restart (suitable for temporary polls)
+- **Backup Options**: Can be extended with S3 backup for persistence
 
-### How It Works
+### Vote Prevention System
 
-1. **First Deployment**: Creates empty SQLite database
-2. **After Votes**: Automatically backs up database to S3
-3. **New Deployment**: Restores database from S3 backup on startup
-4. **Zero Data Loss**: Database survives container restarts and deployments
+1. **Fingerprint Generation**: SHA256 hash of IP + User-Agent + SECRET_SALT
+2. **Duplicate Check**: Database lookup prevents multiple votes from same fingerprint
+3. **Security**: Salt prevents hash reversal and rainbow table attacks
+4. **Limitations**: Same network users blocked, VPN switching allows multiple votes
 
 ## Development
 
@@ -213,6 +215,8 @@ bandit app.py
 - **Health Checks**: ALB performs health checks on `/` endpoint
 - **CloudWatch**: Container logs automatically sent to CloudWatch
 - **ECS Service**: Auto-restart on container failures
+- **Fargate Spot**: Automatic replacement during Spot interruptions
+- **Capacity Providers**: Monitor Spot vs On-Demand task distribution
 
 ## Troubleshooting
 
@@ -224,6 +228,7 @@ bandit app.py
 4. **SSL certificate errors**: Verify ACM certificate ARN in Terraform
 5. **S3 backup failures**: Check IAM permissions for ECS task role
 6. **Database not restoring**: Verify S3 bucket name and object key
+7. **Spot interruptions**: Monitor ECS events for Spot capacity issues
 
 ### Debugging
 
@@ -239,13 +244,26 @@ aws s3 ls s3://your-backup-bucket/survey-poll/
 
 # Verify IAM permissions
 aws iam get-role-policy --role-name ecsTaskRole --policy-name ecsTaskS3Policy
+
+# Monitor Fargate Spot usage
+aws ecs describe-services --cluster survey-poll-cluster --services survey-poll-service --include TAGS
+
+# Check capacity provider metrics
+aws logs filter-log-events --log-group-name /ecs/survey-poll-task --filter-pattern "SPOT"
 ```
 
-### S3 Backup Troubleshooting
+### Application Troubleshooting
 
-- **Backup not working**: Check `S3_BUCKET` environment variable and IAM permissions
-- **Restore failing**: Verify S3 object exists and container has read permissions
-- **Manual backup button not working**: Check admin authentication and S3 configuration
+- **504 Gateway Timeout**: Check ECS task health and security group port 8000 access
+- **403 Forbidden on admin pages**: Verify results_key matches terraform.tfvars value
+- **Vote not saving**: Check container logs and database permissions
+- **SSL certificate errors**: Verify wildcard certificate covers poll subdomain
+
+### Fargate Spot Troubleshooting
+
+- **Frequent interruptions**: Consider adjusting Spot percentage in capacity provider strategy
+- **Higher costs than expected**: Verify Spot allocation is working via ECS console
+- **Performance issues**: Monitor if Spot interruptions cause service disruptions
 
 ## Contributing
 
