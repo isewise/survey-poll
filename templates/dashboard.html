@@ -38,6 +38,9 @@
     .alert { padding: 12px; border-radius: 8px; margin-bottom: 16px; }
     .alert-success { background: #dcfce7; border: 1px solid #86efac; color: #166534; }
     .alert-error { background: #fef2f2; border: 1px solid #fca5a5; color: #dc2626; }
+    .nav-links { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .nav-links a { padding: 8px 12px; border: 1px solid var(--ring); border-radius: 8px; text-decoration: none; color: var(--fg); background: var(--bg); font-size: 0.9rem; }
+    .nav-links a:hover { background: var(--card); }
   </style>
 </head>
 <body>
@@ -70,6 +73,14 @@
 
       <h1>Live Poll</h1>
       <p>{{ question }}</p>
+
+      <!-- Navigation Links -->
+      <div class="nav-links">
+        <a href="{{ vote_url }}" target="_blank">🗳️ Vote Page</a>
+        <a href="{{ url_for('results', key=results_key) }}">📊 Full Results</a>
+        <a href="{{ url_for('stats', key=results_key) }}">📈 JSON Stats</a>
+        <a href="https://www.isaacebooker.com" target="_blank">🌐 My Website</a>
+      </div>
 
       <div id="qrcode" aria-label="QR code to open the voting page"></div>
 
